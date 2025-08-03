@@ -1,0 +1,42 @@
+# AI代理配置
+# 你可以在这里定义多个代理，每个代理可以有不同的角色和模型。
+# 'provider' 字段是可选的，如果没有指定，将默认使用 .env 文件中的 OPENAI_... 配置。
+# 如果指定了 'provider'，系统会尝试从 .env 文件中读取对应的 _API_KEY 和 _BASE_URL。
+# 例如，对于 'some_other_provider'，会查找 SOME_OTHER_PROVIDER_API_KEY 和 SOME_OTHER_PROVIDER_BASE_URL。
+
+agents:
+  # 用于生成初步解决方案思路的代理
+  - name: "solution_generator"
+    model: "gemini-2.5-pro"
+
+  # 用于对生成的思路进行批判性评估的代理
+  - name: "critic"
+    model: "gemini-2.5-pro"
+
+  # 用于执行具体解决方案的代理
+  - name: "executor"
+    model: "gemini-2.5-pro"
+
+  # 用于最终评审和打分的代理
+  - name: "final_reviewer"
+    model: "gemini-2.5-pro"
+
+  # 用于问题分类的路由代理
+  - name: "router"
+    model: "gemini-2.5-pro" # 可以选用更快的模型，例如 gemini-2.5-flash
+
+  # 用于数学推导的代理
+  - name: "mathematician"
+    model: "gemini-2.5-pro"
+
+  # 用于对数学家的工作进行批判性评估的代理
+  - name: "math_critic"
+    model: "gemini-2.5-pro"
+
+  # 用于调用搜索工具的代理
+  - name: "searcher"
+    model: "gemini-2.5-flash"
+
+  # 用于总结搜索内容的代理
+  - name: "summarizer"
+    model: "gemini-2.5-pro"

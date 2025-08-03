@@ -1,0 +1,14 @@
+openai
+python-dotenv
+pyyaml
+prompt_toolkit
+tiktoken
+requests
+pandas
+numpy
+sympy
+scikit-learn
+matplotlib
+beautifulsoup4
+scipy
+cloudscraper
