@@ -1,6 +1,7 @@
 import json
 import asyncio
 import re
+import os
 from typing import Dict, Any, List, AsyncGenerator, Optional
 from .config_loader import load_config, get_agent_settings
 from .agent import Agent
@@ -163,6 +164,25 @@ class Orchestrator:
             self._log(f"\n{'='*20} 流程处理结束 {'='*20}")
             yield {"event": "completed", "nodeId": root_node_id, "content": f"流程处理结束.\n\nToken使用情况:\n{json.dumps(self.total_usage, indent=2)}"}
             return
+        elif problem_type == "CODE_GENERATOR":
+            final_content = ""
+            async for event in self._run_code_generation_workflow(problem, router_node_id):
+                yield event
+                if "final_content" in event:
+                    final_content = event["final_content"]
+            
+            # 代码生成流程结束后，直接结束整个过程
+            self._summarize_usage()
+            if history_id:
+                history_manager.update_history_entry(history_id, {
+                    "status": "completed",
+                    "final_review": final_content,
+                    "usage": self.get_total_usage()
+                })
+
+            self._log(f"\n{'='*20} 流程处理结束 {'='*20}")
+            yield {"event": "completed", "nodeId": root_node_id, "content": f"流程处理结束.\n\nToken使用情况:\n{json.dumps(self.total_usage, indent=2)}"}
+            return
         else: # 默认为 ENGINEER
             final_results_generator = self._run_engineering_workflow(problem, num_solutions, mode, router_node_id)
 
@@ -278,7 +298,7 @@ class Orchestrator:
             solution_generators = [self._process_solution_in_parallel(solution, i, ideas_node_id) for i, solution in enumerate(solutions)]
             async for item in self._run_generators_in_parallel(solution_generators):
                 yield item
-        else: 
+        else:
             final_results = []
             for i, solution in enumerate(solutions):
                 async for item in self._run_sequential_workflow_for_solution(solution, i, ideas_node_id):
@@ -288,6 +308,116 @@ class Orchestrator:
                         yield item
             for res in final_results:
                 yield res
+
+    async def _run_code_generation_workflow(self, problem: str, parent_node_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+        self._log("\n--- 代码生成工作流执行 ---")
+
+        # 1. 解析请求
+        parser_node_id = "parse_request"
+        yield {
+            "event": "progress", "nodeId": parser_node_id, "parentId": parent_node_id, "title": "解析用户请求",
+            "content": "正在解析语言、文件名和任务描述..."
+        }
+        parser = self.agents.get("request_parser")
+        if not parser:
+            yield {"event": "failed", "nodeId": parser_node_id, "content": "错误: 未找到 'request_parser' 代理。"}
+            return
+
+        parser_response = await parser.invoke_non_stream(problem)
+        try:
+            request_details = json.loads(parser_response)
+            yield {
+                "event": "completed", "nodeId": parser_node_id, "title": "请求解析完成",
+                "content": f"语言: {request_details.get('language')}\n文件名: {request_details.get('filename')}\n任务: {request_details.get('task_description')}"
+            }
+        except json.JSONDecodeError:
+            yield {"event": "failed", "nodeId": parser_node_id, "content": f"无法解析请求，解析器返回的不是有效的JSON:\n{parser_response}"}
+            return
+
+        # 2. 生成与审查循环
+        generator = self.agents.get("code_generator")
+        reviewer = self.agents.get("code_reviewer")
+        if not generator or not reviewer:
+            yield {"event": "failed", "nodeId": "code_gen_setup", "parentId": parent_node_id, "content": "错误: 未找到 'code_generator' 或 'code_reviewer' 代理。"}
+            return
+
+        generated_code = ""
+        review_feedback = ""
+        max_iterations = 5
+        
+        for i in range(max_iterations):
+            iter_node_id = f"gen_review_iter_{i}"
+            yield {
+                "event": "progress", "nodeId": iter_node_id, "parentId": parent_node_id, "title": f"代码生成迭代 {i+1}",
+                "content": "代码生成器正在工作中..."
+            }
+
+            # 构建生成器的提示
+            generator_prompt = json.dumps({
+                "language": request_details.get('language'),
+                "filename": request_details.get('filename'),
+                "task_description": request_details.get('task_description') + (f"\n\n请根据以下审查意见进行修改:\n{review_feedback}" if review_feedback else "")
+            })
+
+            # 生成代码
+            current_code = await generator.invoke_non_stream(generator_prompt)
+            
+            # 提取代码块
+            code_match = re.search(r'```.*\n([\s\S]*?)\n```', current_code, re.DOTALL)
+            if not code_match:
+                yield {"event": "failed", "nodeId": iter_node_id, "content": f"代码生成器未能返回有效的代码块:\n{current_code}"}
+                return
+            
+            generated_code = code_match.group(1)
+
+            yield {
+                "event": "progress", "nodeId": f"review_{i}", "parentId": iter_node_id, "title": f"代码审查 {i+1}",
+                "content": "代码审查员正在审查代码..."
+            }
+            
+            # 审查代码
+            review_response = await reviewer.invoke_non_stream(current_code)
+
+            if "[ACCEPTABLE]" in review_response:
+                yield {
+                    "event": "completed", "nodeId": iter_node_id, "title": f"迭代 {i+1} 完成 (已接受)",
+                    "content": f"生成的代码:\n```\n{generated_code}\n```\n\n审查意见: {review_response}"
+                }
+                break
+            else:
+                review_feedback = review_response.replace("[REJECTED]", "").strip()
+                yield {
+                    "event": "completed", "nodeId": iter_node_id, "title": f"迭代 {i+1} 完成 (已拒绝)",
+                    "content": f"生成的代码:\n```\n{generated_code}\n```\n\n审查意见: {review_feedback}"
+                }
+                if i == max_iterations - 1:
+                    yield {"event": "failed", "nodeId": parent_node_id, "content": "已达到最大迭代次数，代码仍未通过审查。"}
+                    return
+
+        # 3. 保存文件
+        save_node_id = "save_file"
+        yield {
+            "event": "progress", "nodeId": save_node_id, "parentId": parent_node_id, "title": "保存文件",
+            "content": "正在将最终代码保存到文件..."
+        }
+        try:
+            output_dir = "generated_code"
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            file_path = os.path.join(output_dir, request_details.get("filename"))
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(generated_code)
+            
+            yield {
+                "event": "completed", "nodeId": save_node_id, "title": "文件保存成功",
+                "content": f"代码已成功保存到: {file_path}"
+            }
+            # Yield a final result for the main run method to capture
+            yield {"final_content": f"代码已成功生成并保存到 `{file_path}`。"}
+
+        except Exception as e:
+            yield {"event": "failed", "nodeId": save_node_id, "content": f"保存文件时出错: {e}"}
 
 
     async def _run_sequential_workflow_for_solution(self, solution: Dict[str, Any], index: int, parent_node_id: str):

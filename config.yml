@@ -65,3 +65,16 @@ agents:
   # 步骤3：综合所有内容并润色
   - name: "editor_in_chief"
     model: "gemini-2.5-pro"
+
+  # --- 新增：代码生成工作流代理 ---
+  # 用于解析用户代码生成请求的代理
+  - name: "request_parser"
+    model: "gemini-2.5-flash"
+
+  # 用于根据结构化请求生成代码的代理
+  - name: "code_generator"
+    model: "gemini-2.5-pro"
+
+  # 用于审查生成代码的代理
+  - name: "code_reviewer"
+    model: "gemini-2.5-pro"

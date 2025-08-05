@@ -3,3 +3,6 @@ log.txt
 .env
 history.json
 __pycache__
+
+# Generated code
+generated_code/
