@@ -23,10 +23,18 @@ agents:
 
   # 用于问题分类的路由代理
   - name: "router"
-    model: "gemini-2.5-pro" # 可以选用更快的模型，例如 gemini-2.5-flash
+    model: "gemini-2.5-flash" # 可以选用更快的模型
+
+  # 用于生成数学解题策略的代理
+  - name: "math_strategy_generator"
+    model: "gemini-2.5-pro"
 
   # 用于数学推导的代理
   - name: "mathematician"
+    model: "gemini-2.5-pro"
+
+  # 新增：用于数学探索和构造猜想的代理
+  - name: "math_explorer"
     model: "gemini-2.5-pro"
 
   # 用于对数学家的工作进行批判性评估的代理
@@ -39,4 +47,21 @@ agents:
 
   # 用于总结搜索内容的代理
   - name: "summarizer"
+    model: "gemini-2.5-pro"
+
+  # 用于攻击策略基本假设的怀疑论者代理
+  - name: "skeptic"
+    model: "gemini-2.5-pro"
+
+  # --- 新增：深度通用工作流代理 ---
+  # 步骤1：提出多个分析角度
+  - name: "creative_strategist"
+    model: "gemini-2.5-pro"
+
+  # 步骤2：对单个角度进行内容扩展
+  - name: "content_generator"
+    model: "gemini-2.5-pro"
+
+  # 步骤3：综合所有内容并润色
+  - name: "editor_in_chief"
     model: "gemini-2.5-pro"

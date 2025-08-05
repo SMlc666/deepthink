@@ -1,3 +1,5 @@
 .app_history
 log.txt
 .env
+history.json
+__pycache__
